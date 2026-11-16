@@ -1,8 +1,12 @@
 package com.timer
 
-sealed class TimerState(val idEvent: Long?) {
-    data object StartTimer: TimerState(Long.MIN_VALUE)
-    data object PausedTimer: TimerState(Long.MAX_VALUE)
-    data object InProgressTimer: TimerState(null)
-    data object FinishedTimer: TimerState(0L)
+/** State of the countdown, observable through [TimerService.state]. */
+sealed interface TimerState {
+    data object Idle : TimerState
+
+    data class Running(val remainingMillis: Long, val totalMillis: Long) : TimerState
+
+    data class Paused(val remainingMillis: Long, val totalMillis: Long) : TimerState
+
+    data class Finished(val totalMillis: Long) : TimerState
 }
