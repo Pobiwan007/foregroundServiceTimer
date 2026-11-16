@@ -1,332 +1,241 @@
 package com.timer
 
-import android.app.ForegroundServiceStartNotAllowedException
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.media.MediaPlayer
-import android.os.Binder
 import android.os.Build
-import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
+import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import com.common.sharedPreference.BaseSharedPreference
+import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
-import java.util.Timer
 import javax.inject.Inject
 
-const val TIMER_VALUE = "TIMER_VALUE"
-const val NOT_VALUE = "NOT_VALUE"
-
+/**
+ * Foreground service that runs a countdown, shows its progress in a notification with
+ * pause / resume / stop actions, and plays a sound when it ends.
+ *
+ * Observe [state] from any screen; control the service with [start], [pause], [resume], [stop].
+ * App-specific texts, icons and sound come from a [TimerProvider] bound in the app's Hilt graph.
+ */
 @AndroidEntryPoint
-open class TimerService : LifecycleService() {
+class TimerService : LifecycleService() {
+
     @Inject
     lateinit var timerProvider: TimerProvider
 
-    @Inject
-    lateinit var baseSharedPreferences: BaseSharedPreference
+    private val notificationManager by lazy { NotificationManagerCompat.from(this) }
+    private val countdown by lazy { CountdownTimer(lifecycleScope, SystemClock::elapsedRealtime) }
+    private var mediaPlayer: MediaPlayer? = null
 
-    private val binder = LocalBinder()
-    private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
-    private val timerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-
-    private var timeLeftInMillis: Long = 0L
-    private var countDownTimer: Job? = null
-    private var isTimerRunning = false
-    private var totalTimerMillis: Long = 0L
-
-    inner class LocalBinder : Binder() {
-        fun getService(): TimerService = this@TimerService
-    }
-
-    override fun onBind(intent: Intent): IBinder {
-        super.onBind(intent)
-        return binder
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        lifecycleScope.launch {
+            // drop(1): skip the initial Idle, which would otherwise stop the service right away
+            countdown.state.drop(1).collect { state ->
+                _state.value = state
+                render(state)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
             ACTION_START -> {
-                intent.getLongExtra(EXTRA_TIME, 0L).also { value ->
-                    Log.e("StartedService", value.toString())
-                    timeLeftInMillis = value
-                    totalTimerMillis = value
-                }
-                startForegroundService()
-                startTimer()
+                val duration = intent.getLongExtra(EXTRA_DURATION, 0L)
+                if (duration > 0L && promoteToForeground(duration)) countdown.start(duration) else stopSelf()
             }
-
-            ACTION_STOP -> {
-                stopTimer()
-                stopSelf()
-            }
-
-            ACTION_FINISH -> {
-                finish()
-            }
-
-            ACTION_RESUME -> {
-                resumeTimer()
-            }
-
-            ACTION_PAUSE -> {
-                pauseTimer()
-            }
-
+            ACTION_PAUSE -> countdown.pause()
+            ACTION_RESUME -> countdown.resume()
             ACTION_REPLAY -> {
-                timeLeftInMillis = totalTimerMillis
-                startTimer()
-                updateNotification()
+                val total = (countdown.state.value as? TimerState.Finished)?.totalMillis
+                if (total != null && promoteToForeground(total)) countdown.restart()
             }
+            ACTION_STOP -> countdown.stop()
         }
         return START_NOT_STICKY
     }
 
-
-    private fun pauseTimer() {
-        if (isTimerRunning) {
-            sendTimeUpdate(TimerState.PausedTimer.idEvent)
-            countDownTimer?.cancel()
-            isTimerRunning = false
-            updateNotification()
-        }
+    override fun onDestroy() {
+        mediaPlayer?.release()
+        mediaPlayer = null
+        _state.value = TimerState.Idle
+        super.onDestroy() // cancels lifecycleScope and the countdown with it
     }
 
-    private fun resumeTimer() {
-        if (!isTimerRunning) {
-            sendTimeUpdate()
-            startCountdown()
-            isTimerRunning = true
-        }
-    }
-
-    private fun startTimer() {
-        if (isTimerRunning) return
-        isTimerRunning = true
-        startCountdown()
-    }
-
-    private fun startCountdown() {
-        countDownTimer = timerScope.launch {
-            while (timeLeftInMillis > 0) {
-                if (timeLeftInMillis % 60000 == 0L) {
-                    sendTimeUpdate()
-                }
-                delay(1000)
-                timeLeftInMillis -= 1000
-
-                updateNotification()
+    private fun render(state: TimerState) {
+        when (state) {
+            is TimerState.Running -> notify(buildProgressNotification(state.remainingMillis, isRunning = true))
+            is TimerState.Paused -> notify(buildProgressNotification(state.remainingMillis, isRunning = false))
+            is TimerState.Finished -> {
+                // Keep the "done" notification (with Replay) but let the system reclaim the service priority.
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH)
+                notify(buildDoneNotification())
+                playDoneSound()
             }
-            stopTimer()
+            TimerState.Idle -> {
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                notificationManager.cancel(NOTIFICATION_ID)
+                stopSelf()
+            }
         }
     }
 
-    private fun sendTimeUpdate(timerState: Long? = null) {
-        val intent = Intent(ACTION_UPDATE).apply {
-            if (timerState == null)
-                putExtra(EXTRA_TIME, timeLeftInMillis)
-            else
-                putExtra(EXTRA_TIME, timerState)
-        }
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
-    }
-
-    private fun stopTimer() {
-        countDownTimer?.cancel()
-        isTimerRunning = false
-        stopForeground(false)
-        if (timeLeftInMillis > 0) {
-            sendTimeUpdate(TimerState.StartTimer.idEvent)
-            stopSelf()
+    /** @return `false` if the system refused to start a foreground service (e.g. from background on API 31+). */
+    private fun promoteToForeground(remainingMillis: Long): Boolean = try {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else {
-            playNotificationSound()
-            updateNotification()
-            sendTimeUpdate(TimerState.FinishedTimer.idEvent)
+            0
         }
-    }
-
-    private fun finish(){
-        countDownTimer?.cancel()
-        isTimerRunning = false
-        stopForeground(false)
-        stopSelf()
-    }
-
-    private fun startForegroundService() {
-        createNotificationChannel()
-        val notification = buildProgressNotification()
-        try {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                startForeground(NOTIFICATION_ID, notification)
-            } else {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                )
-            }
-        } catch (e: Exception) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                && e is ForegroundServiceStartNotAllowedException
-            ) {
-                e.printStackTrace()
-            }
-        }
-
-    }
-
-    private fun updateNotification() {
-        val isGranted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ||
-                baseSharedPreferences.getBoolean(NOT_VALUE, true)
-
-        if (!isGranted) return
-
-        val notification = if (timeLeftInMillis > 0) {
-            buildProgressNotification()
-        } else {
-            buildDoneNotification()
-        }
-
-        notificationManager.notify(NOTIFICATION_ID, notification)
-    }
-
-    private fun playNotificationSound() {
-        val mediaPlayer = MediaPlayer.create(this, timerProvider.timerDone.doneSound)
-        val volume = baseSharedPreferences.getFloat(TIMER_VALUE, 0.5f)
-        Log.e("TimerService", (volume).toString())
-
-        mediaPlayer.setVolume(volume, volume)
-        mediaPlayer.start()
-    }
-
-    private fun formatTime(timeMillis: Long): String {
-        val minutes = (timeMillis / 1000) / 60
-        val seconds = (timeMillis / 1000) % 60
-        return String.format("%02d:%02d", minutes, seconds)
-    }
-
-    private fun getPendingIntent(action: String): PendingIntent {
-        val intent = Intent(this, TimerService::class.java).apply { this.action = action }
-        return PendingIntent.getService(
+        ServiceCompat.startForeground(
             this,
-            action.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            NOTIFICATION_ID,
+            buildProgressNotification(remainingMillis, isRunning = true),
+            type
         )
+        true
+    } catch (e: IllegalStateException) { // ForegroundServiceStartNotAllowedException on API 31+
+        Log.w(TAG, "Cannot start foreground service", e)
+        false
+    }
+
+    @SuppressLint("MissingPermission") // checked in canPostNotifications()
+    private fun notify(notification: Notification) {
+        if (canPostNotifications()) notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun canPostNotifications(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun playDoneSound() {
+        val soundRes = timerProvider.doneContent.doneSound ?: return
+        val volume = timerProvider.soundVolume.coerceIn(0f, 1f)
+        mediaPlayer?.release()
+        mediaPlayer = MediaPlayer.create(this, soundRes)?.apply {
+            setVolume(volume, volume)
+            setOnCompletionListener { player ->
+                player.release()
+                if (mediaPlayer === player) mediaPlayer = null
+            }
+            start()
+        }
+    }
+
+    private fun buildProgressNotification(remainingMillis: Long, isRunning: Boolean): Notification {
+        val content = timerProvider.progressContent
+        return baseBuilder(content.appearance)
+            .setContentText(formatRemainingTime(remainingMillis))
+            .apply {
+                if (isRunning) {
+                    addAction(0, content.pauseLabel, serviceIntent(ACTION_PAUSE))
+                } else {
+                    addAction(0, content.resumeLabel, serviceIntent(ACTION_RESUME))
+                }
+            }
+            .addAction(0, content.stopLabel, serviceIntent(ACTION_STOP))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .build()
     }
 
     private fun buildDoneNotification(): Notification {
-        val pendingIntent = timerProvider.getIntent()
-
-        val timerData = timerProvider.timerDone
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(timerData.title)
-            .setSmallIcon(timerData.smallIconResource, 0)
-            .setStyle(
-                NotificationCompat.BigPictureStyle()
-                    .bigPicture(timerData.largeIcon)
-            )
-            .setLargeIcon(timerData.bigIcon)
-            .setContentText(timerData.contentText)
-            .addAction(0, timerData.replay, getPendingIntent(ACTION_REPLAY))
-            .addAction(0, timerData.stop, getPendingIntent(ACTION_FINISH))
-            .setCategory(Notification.CATEGORY_SERVICE)
+        val content = timerProvider.doneContent
+        return baseBuilder(content.appearance)
+            .setContentText(content.contentText)
+            .addAction(0, content.replayLabel, serviceIntent(ACTION_REPLAY))
+            .addAction(0, content.stopLabel, serviceIntent(ACTION_STOP))
             .setOngoing(false)
-            .setVibrate(null)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(pendingIntent)
+            .setDeleteIntent(serviceIntent(ACTION_STOP))
             .build()
     }
 
-    private fun buildProgressNotification(): Notification {
-        val pendingIntent = timerProvider.getIntent()
-
-        val timerData = timerProvider.timerProgress
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(timerData.title)
-            .setSmallIcon(timerData.smallIconResource, 0)
-            .setStyle(
-                NotificationCompat.BigPictureStyle()
-                    .bigPicture(timerData.largeIcon)
-            )
-            .setLargeIcon(timerData.bigIcon)
-            .setContentText(formatTime(timeLeftInMillis))
-            .addAction(
-                0,
-                timerData.pause,
-                if (isTimerRunning) getPendingIntent(ACTION_PAUSE) else null
-            )
-            .addAction(
-                0,
-                timerData.`continue`,
-                if (!isTimerRunning) getPendingIntent(ACTION_RESUME) else null
-            )
-            .addAction(0, timerData.stop, getPendingIntent(ACTION_STOP))
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .setOngoing(true)
-            .setVibrate(null)
+    private fun baseBuilder(appearance: NotificationAppearance): NotificationCompat.Builder =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(appearance.title)
+            .setSmallIcon(appearance.smallIconRes)
+            .setLargeIcon(appearance.largeIcon)
+            .apply {
+                appearance.bigPicture?.let { setStyle(NotificationCompat.BigPictureStyle().bigPicture(it)) }
+            }
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(pendingIntent)
-            .build()
-    }
+            .setContentIntent(timerProvider.contentIntent())
+
+    private fun serviceIntent(action: String): PendingIntent =
+        PendingIntent.getService(
+            this,
+            action.hashCode(),
+            Intent(this, TimerService::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID, "Таймер", NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows timer progress"
-                setShowBadge(false)
-            }
-            notificationManager.createNotificationChannel(channel)
-        }
+        val channel = NotificationChannelCompat.Builder(CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName(timerProvider.channelName)
+            .setShowBadge(false)
+            .build()
+        notificationManager.createNotificationChannel(channel)
     }
 
     companion object {
-        private const val CHANNEL_ID = "TIMER_CHANNEL"
-        private const val NOTIFICATION_ID = 1
-        const val ACTION_PAUSE = "com.cooker.timer.ACTION_PAUSE"
-        const val ACTION_REPLAY = "REPLAY_TIMER"
-        const val ACTION_RESUME = "com.cooker.timer.ACTION_RESUME"
-        const val ACTION_START = "START_TIMER"
-        const val ACTION_STOP = "STOP_TIMER"
-        const val EXTRA_TIME = "EXTRA_TIME"
-        const val ACTION_FINISH = "ACTION_FINISH"
-        const val ACTION_UPDATE = "UPDATE_TIME"
+        private const val TAG = "TimerService"
+        private const val CHANNEL_ID = "com.timer.TIMER_CHANNEL"
+        private const val NOTIFICATION_ID = 7_001
 
-        fun startService(context: Context, timeMillis: Long) {
-            val intent = Intent(context, TimerService::class.java).apply {
-                action = ACTION_START
-                putExtra(EXTRA_TIME, timeMillis)
-            }
+        const val ACTION_START = "com.timer.action.START"
+        const val ACTION_PAUSE = "com.timer.action.PAUSE"
+        const val ACTION_RESUME = "com.timer.action.RESUME"
+        const val ACTION_REPLAY = "com.timer.action.REPLAY"
+        const val ACTION_STOP = "com.timer.action.STOP"
+        const val EXTRA_DURATION = "com.timer.extra.DURATION"
 
-            ContextCompat.startForegroundService(context, intent)
+        private val _state = MutableStateFlow<TimerState>(TimerState.Idle)
+
+        /** Current timer state; survives configuration changes and can be collected from any screen. */
+        val state: StateFlow<TimerState> = _state.asStateFlow()
+
+        fun start(context: Context, durationMillis: Long) {
+            require(durationMillis > 0) { "Duration must be positive, was $durationMillis" }
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, TimerService::class.java)
+                    .setAction(ACTION_START)
+                    .putExtra(EXTRA_DURATION, durationMillis)
+            )
         }
 
-        fun pauseService(context: Context, timerValue: Long){
-            val intent = Intent(context, TimerService::class.java).apply {
-                action = ACTION_PAUSE
-                putExtra(EXTRA_TIME, timerValue)
-            }
-            context.startService(intent)
-        }
-        fun stopService(context: Context) {
-            val intent = Intent(context, TimerService::class.java).apply { action = ACTION_STOP }
-            context.startService(intent)
+        fun pause(context: Context) = send(context, ACTION_PAUSE)
+
+        fun resume(context: Context) = send(context, ACTION_RESUME)
+
+        fun stop(context: Context) = send(context, ACTION_STOP)
+
+        private fun send(context: Context, action: String) {
+            // Only meaningful while the service is alive; avoids starting it just to stop it.
+            if (_state.value == TimerState.Idle) return
+            context.startService(Intent(context, TimerService::class.java).setAction(action))
         }
     }
 }
