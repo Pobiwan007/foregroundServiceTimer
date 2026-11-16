@@ -1,46 +1,43 @@
-
 plugins {
-    id(BuildPlugins.ANDROID_LIBRARY)
-    id(BuildPlugins.KOTLIN_ANDROID)
-    id(BuildPlugins.KOTLIN_KSP)
-    id(BuildPlugins.DAGGER_HILT)
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt)
 }
 
 android {
-    namespace = "com.example.timer"
+    namespace = "com.timer"
     compileSdk = 35
 
     defaultConfig {
         minSdk = 24
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
         }
     }
+
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
 }
 
 dependencies {
-    implementation(Libs.lifecycleService)
-    MainLibraries()
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.service)
+    implementation(libs.kotlinx.coroutines.android)
 
-    DaggerLibraries()
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
 
-    implementation(project(":common"))
-    TestLibraries()
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
