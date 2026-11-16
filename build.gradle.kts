@@ -3,7 +3,11 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    `maven-publish`
 }
+
+group = "com.github.Pobiwan007"
+version = "1.0.0"
 
 android {
     namespace = "com.timer"
@@ -28,6 +32,12 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
 }
 
 dependencies {
@@ -41,4 +51,13 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+}
+
+publishing {
+    publications {
+        register<MavenPublication>("release") {
+            artifactId = "foregroundServiceTimer"
+            afterEvaluate { from(components["release"]) }
+        }
+    }
 }
