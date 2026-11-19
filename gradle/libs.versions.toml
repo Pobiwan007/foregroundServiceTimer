@@ -5,6 +5,9 @@ coroutines = "1.9.0"
 coreKtx = "1.15.0"
 lifecycle = "2.8.7"
 junit = "4.13.2"
+robolectric = "4.14.1"
+androidxTestCore = "1.6.1"
+androidxTestJunit = "1.2.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -15,6 +18,9 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 
 junit = { module = "junit:junit", version.ref = "junit" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+androidx-test-core = { module = "androidx.test:core-ktx", version.ref = "androidxTestCore" }
+androidx-test-junit = { module = "androidx.test.ext:junit-ktx", version.ref = "androidxTestJunit" }
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }

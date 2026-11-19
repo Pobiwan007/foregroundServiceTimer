@@ -29,6 +29,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     publishing {
         singleVariant("release") {
             withSourcesJar()
@@ -52,6 +56,9 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.test.junit)
 }
 
 publishing {
