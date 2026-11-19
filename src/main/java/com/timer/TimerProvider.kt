@@ -16,6 +16,9 @@ interface TimerProvider {
     /** Volume of the completion sound in `0f..1f`. */
     val soundVolume: Float get() = 0.5f
 
-    /** User-visible name of the notification channel. */
+    /** User-visible name of the channel for the running / paused countdown. */
     val channelName: String get() = "Timer"
+
+    /** User-visible name of the high-importance channel for the "done" notification. */
+    val completionChannelName: String get() = "Timer finished"
 }

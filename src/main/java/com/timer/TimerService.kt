@@ -15,12 +15,15 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import com.timer.TimerNotificationFactory.Companion.COMPLETION_NOTIFICATION_ID
 import com.timer.TimerNotificationFactory.Companion.PROGRESS_NOTIFICATION_ID
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -46,11 +49,13 @@ class TimerService : LifecycleService() {
         super.onCreate()
         notifications.createChannels()
         lifecycleScope.launch {
-            // drop(1): skip the initial Idle, which would otherwise stop the service right away
-            countdown.state.drop(1).collect { state ->
-                _state.value = state
-                render(state)
-            }
+            countdown.state
+                .drop(1) // skip the initial Idle, which would otherwise stop the service right away
+                .onEach { _state.value = it }
+                // The state ticks every second for the UI; the notification only changes with the
+                // kind of state, because the running one counts down with the system chronometer.
+                .distinctUntilChanged { old, new -> old::class == new::class }
+                .collect(::render)
         }
     }
 
@@ -80,17 +85,17 @@ class TimerService : LifecycleService() {
 
     private fun render(state: TimerState) {
         when (state) {
-            is TimerState.Running -> notify(notifications.progress(state.remainingMillis, isRunning = true))
-            is TimerState.Paused -> notify(notifications.progress(state.remainingMillis, isRunning = false))
+            is TimerState.Running -> notify(PROGRESS_NOTIFICATION_ID, notifications.running(state.remainingMillis))
+            is TimerState.Paused -> notify(PROGRESS_NOTIFICATION_ID, notifications.paused(state.remainingMillis))
             is TimerState.Finished -> {
-                // Keep the "done" notification (with Replay) but let the system reclaim the service priority.
-                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH)
-                notify(notifications.finished())
+                // A separate notification on the high-importance channel, so it pops up as heads-up.
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                notify(COMPLETION_NOTIFICATION_ID, notifications.finished())
                 playDoneSound()
             }
             TimerState.Idle -> {
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                notificationManager.cancel(PROGRESS_NOTIFICATION_ID)
+                notificationManager.cancel(COMPLETION_NOTIFICATION_ID)
                 stopSelf()
             }
         }
@@ -106,9 +111,10 @@ class TimerService : LifecycleService() {
         ServiceCompat.startForeground(
             this,
             PROGRESS_NOTIFICATION_ID,
-            notifications.progress(remainingMillis, isRunning = true),
+            notifications.running(remainingMillis),
             type
         )
+        notificationManager.cancel(COMPLETION_NOTIFICATION_ID)
         true
     } catch (e: IllegalStateException) { // ForegroundServiceStartNotAllowedException on API 31+
         Log.w(TAG, "Cannot start foreground service", e)
@@ -116,8 +122,8 @@ class TimerService : LifecycleService() {
     }
 
     @SuppressLint("MissingPermission") // checked in canPostNotifications()
-    private fun notify(notification: Notification) {
-        if (canPostNotifications()) notificationManager.notify(PROGRESS_NOTIFICATION_ID, notification)
+    private fun notify(id: Int, notification: Notification) {
+        if (canPostNotifications()) notificationManager.notify(id, notification)
     }
 
     private fun canPostNotifications(): Boolean =
