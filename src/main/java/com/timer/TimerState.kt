@@ -1,6 +1,6 @@
 package com.timer
 
-/** State of the countdown, observable through [TimerService.state]. */
+/** State of the countdown, observable through [TimerController.state]. */
 sealed interface TimerState {
     data object Idle : TimerState
 

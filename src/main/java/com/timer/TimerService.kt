@@ -18,9 +18,6 @@ import androidx.lifecycle.lifecycleScope
 import com.timer.TimerNotificationFactory.Companion.COMPLETION_NOTIFICATION_ID
 import com.timer.TimerNotificationFactory.Companion.PROGRESS_NOTIFICATION_ID
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.onEach
@@ -28,14 +25,13 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Foreground service that runs a countdown, shows its progress in a notification with
- * pause / resume / stop actions, and plays a sound when it ends.
+ * Thin orchestrator: routes intents to [CountdownTimer], publishes its state to [TimerStateStore]
+ * and delegates rendering to [TimerNotificationFactory] and [CompletionSoundPlayer].
  *
  * Lifecycle: foreground while running or paused; once finished it posts the "done" notification,
  * plays the sound and stops itself. Replay / Stop on that notification start it again.
  *
- * Observe [state] from any screen; control the service with [start], [pause], [resume], [stop].
- * App-specific texts, icons and sound come from a [TimerProvider] bound in the app's Hilt graph.
+ * Controlled through [TimerController]. App-specific texts, icons and sound come from a [TimerProvider] bound in the app's Hilt graph.
  */
 @AndroidEntryPoint
 class TimerService : LifecycleService() {
@@ -55,7 +51,7 @@ class TimerService : LifecycleService() {
         lifecycleScope.launch {
             countdown.state
                 .drop(1) // the initial Idle of a fresh countdown must not overwrite a Finished state
-                .onEach { _state.value = it }
+                .onEach { TimerStateStore.update(it) }
                 // The UI ticks every second; the notification only changes with the kind of state.
                 .distinctUntilChanged { old, new -> old::class == new::class }
                 .collect(::render)
@@ -79,7 +75,7 @@ class TimerService : LifecycleService() {
     override fun onDestroy() {
         soundPlayer.release()
         // Keep Finished so the UI can still show "done" while its notification is visible.
-        if (_state.value !is TimerState.Finished) _state.value = TimerState.Idle
+        if (TimerStateStore.state.value !is TimerState.Finished) TimerStateStore.update(TimerState.Idle)
         super.onDestroy() // cancels lifecycleScope and the countdown with it
     }
 
@@ -120,7 +116,7 @@ class TimerService : LifecycleService() {
         countdown.stop()
         soundPlayer.release()
         isPlayingSound = false
-        _state.value = TimerState.Idle
+        TimerStateStore.update(TimerState.Idle)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         notificationManager.cancel(COMPLETION_NOTIFICATION_ID)
         stopSelf()
@@ -161,33 +157,11 @@ class TimerService : LifecycleService() {
     companion object {
         private const val TAG = "TimerService"
 
-        const val ACTION_START = "com.timer.action.START"
-        const val ACTION_PAUSE = "com.timer.action.PAUSE"
-        const val ACTION_RESUME = "com.timer.action.RESUME"
-        const val ACTION_STOP = "com.timer.action.STOP"
-        const val EXTRA_DURATION = "com.timer.extra.DURATION"
-
-        private val _state = MutableStateFlow<TimerState>(TimerState.Idle)
-
-        /** Current timer state; survives configuration changes and can be collected from any screen. */
-        val state: StateFlow<TimerState> = _state.asStateFlow()
-
-        fun start(context: Context, durationMillis: Long) {
-            require(durationMillis > 0) { "Duration must be positive, was $durationMillis" }
-            ContextCompat.startForegroundService(context, startIntent(context, durationMillis))
-        }
-
-        fun pause(context: Context) = send(context, ACTION_PAUSE)
-
-        fun resume(context: Context) = send(context, ACTION_RESUME)
-
-        fun stop(context: Context) = send(context, ACTION_STOP)
-
-        private fun send(context: Context, action: String) {
-            // Only meaningful while a countdown exists; avoids starting the service just to stop it.
-            if (_state.value == TimerState.Idle) return
-            context.startService(intent(context, action))
-        }
+        internal const val ACTION_START = "com.timer.action.START"
+        internal const val ACTION_PAUSE = "com.timer.action.PAUSE"
+        internal const val ACTION_RESUME = "com.timer.action.RESUME"
+        internal const val ACTION_STOP = "com.timer.action.STOP"
+        internal const val EXTRA_DURATION = "com.timer.extra.DURATION"
 
         internal fun intent(context: Context, action: String): Intent =
             Intent(context, TimerService::class.java).setAction(action)
