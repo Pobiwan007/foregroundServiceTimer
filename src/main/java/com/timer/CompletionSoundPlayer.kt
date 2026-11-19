@@ -12,7 +12,7 @@ import androidx.annotation.RawRes
  * Uses alarm audio attributes, so the sound follows the alarm volume (like the system clock app)
  * instead of the media volume, which is often muted.
  */
-class CompletionSoundPlayer(private val context: Context) {
+internal class CompletionSoundPlayer(private val context: Context) {
 
     private var player: MediaPlayer? = null
 
