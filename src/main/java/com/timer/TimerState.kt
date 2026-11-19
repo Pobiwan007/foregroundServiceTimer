@@ -1,12 +1,12 @@
 package com.timer
 
 /** State of the countdown, observable through [TimerController.state]. */
-sealed interface TimerState {
-    data object Idle : TimerState
+public sealed interface TimerState {
+    public data object Idle : TimerState
 
-    data class Running(val remainingMillis: Long, val totalMillis: Long) : TimerState
+    public data class Running(public val remainingMillis: Long, public val totalMillis: Long) : TimerState
 
-    data class Paused(val remainingMillis: Long, val totalMillis: Long) : TimerState
+    public data class Paused(public val remainingMillis: Long, public val totalMillis: Long) : TimerState
 
-    data class Finished(val totalMillis: Long) : TimerState
+    public data class Finished(public val totalMillis: Long) : TimerState
 }

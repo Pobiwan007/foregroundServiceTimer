@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
  *
  * @param clock monotonic time source (`SystemClock::elapsedRealtime` on Android).
  */
-class CountdownTimer(
+internal class CountdownTimer(
     private val scope: CoroutineScope,
     private val clock: Clock,
     private val tickMillis: Long = 1_000L

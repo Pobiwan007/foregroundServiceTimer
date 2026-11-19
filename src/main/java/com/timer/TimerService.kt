@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
  * Controlled through [TimerController]. App-specific texts, icons and sound come from the
  * [TimerProvider] of the host [android.app.Application] (see [TimerProviderOwner]).
  */
-class TimerService : LifecycleService() {
+internal class TimerService : LifecycleService() {
 
     private val timerProvider: TimerProvider by lazy { TimerProviderOwner.from(application) }
 

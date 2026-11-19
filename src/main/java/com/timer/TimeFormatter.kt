@@ -6,7 +6,7 @@ import java.util.Locale
  * Formats remaining time as `mm:ss`, or `h:mm:ss` from one hour on.
  * Seconds are rounded **up**, so a timer never shows `00:00` while it is still running.
  */
-fun formatRemainingTime(millis: Long): String {
+public fun formatRemainingTime(millis: Long): String {
     val totalSeconds = (millis.coerceAtLeast(0L) + 999L) / 1000L
     val hours = totalSeconds / 3600
     val minutes = totalSeconds % 3600 / 60
