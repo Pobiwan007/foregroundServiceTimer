@@ -41,7 +41,7 @@ class TimerService : LifecycleService() {
     lateinit var timerProvider: TimerProvider
 
     private val notificationManager by lazy { NotificationManagerCompat.from(this) }
-    private val countdown by lazy { CountdownTimer(lifecycleScope, SystemClock::elapsedRealtime) }
+    private val countdown by lazy { CountdownTimer(lifecycleScope, Clock(SystemClock::elapsedRealtime)) }
     private var mediaPlayer: MediaPlayer? = null
 
     override fun onCreate() {

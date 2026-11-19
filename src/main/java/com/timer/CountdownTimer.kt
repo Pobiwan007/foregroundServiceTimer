@@ -16,11 +16,14 @@ import kotlinx.coroutines.launch
  * delayed (busy main thread, Doze, etc.). Ticks are aligned to whole [tickMillis] of the
  * remaining time, so the displayed seconds stay stable after pause/resume.
  *
- * @param clock monotonic time source in milliseconds (`SystemClock::elapsedRealtime` on Android).
+ * Not thread-safe: confine all calls and the [scope] to a single thread (the main thread in
+ * `TimerService`), which keeps the implementation free of locks.
+ *
+ * @param clock monotonic time source (`SystemClock::elapsedRealtime` on Android).
  */
 class CountdownTimer(
     private val scope: CoroutineScope,
-    private val clock: () -> Long,
+    private val clock: Clock,
     private val tickMillis: Long = 1_000L
 ) {
     private val _state = MutableStateFlow<TimerState>(TimerState.Idle)
@@ -63,7 +66,7 @@ class CountdownTimer(
 
     private fun run(remainingMillis: Long, totalMillis: Long) {
         job?.cancel()
-        endAt = clock() + remainingMillis
+        endAt = clock.nowMillis() + remainingMillis
         _state.value = TimerState.Running(remainingMillis, totalMillis)
         job = scope.launch {
             while (true) {
@@ -77,5 +80,5 @@ class CountdownTimer(
         }
     }
 
-    private fun remaining(): Long = (endAt - clock()).coerceAtLeast(0L)
+    private fun remaining(): Long = (endAt - clock.nowMillis()).coerceAtLeast(0L)
 }
