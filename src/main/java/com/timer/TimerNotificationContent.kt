@@ -5,26 +5,26 @@ import androidx.annotation.DrawableRes
 import androidx.annotation.RawRes
 
 /** Visual part shared by the "in progress" and "done" notifications. */
-data class NotificationAppearance(
-    val title: String,
-    @DrawableRes val smallIconRes: Int,
-    val largeIcon: Bitmap? = null,
-    val bigPicture: Bitmap? = null
+public data class NotificationAppearance(
+    public val title: String,
+    @DrawableRes public val smallIconRes: Int,
+    public val largeIcon: Bitmap? = null,
+    public val bigPicture: Bitmap? = null
 )
 
 /** Notification shown while the timer is running or paused. */
-data class TimerProgressContent(
-    val appearance: NotificationAppearance,
-    val pauseLabel: String,
-    val resumeLabel: String,
-    val stopLabel: String
+public data class TimerProgressContent(
+    public val appearance: NotificationAppearance,
+    public val pauseLabel: String,
+    public val resumeLabel: String,
+    public val stopLabel: String
 )
 
 /** Notification shown when the timer has finished. */
-data class TimerDoneContent(
-    val appearance: NotificationAppearance,
-    val contentText: String,
-    val replayLabel: String,
-    val stopLabel: String,
-    @RawRes val doneSound: Int? = null
+public data class TimerDoneContent(
+    public val appearance: NotificationAppearance,
+    public val contentText: String,
+    public val replayLabel: String,
+    public val stopLabel: String,
+    @RawRes public val doneSound: Int? = null
 )

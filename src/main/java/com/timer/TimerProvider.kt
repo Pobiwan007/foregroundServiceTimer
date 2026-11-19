@@ -3,19 +3,22 @@ package com.timer
 import android.app.PendingIntent
 
 /**
- * Supplied by the host app through Hilt: everything app-specific the service needs
- * (texts, icons, sound, the screen to open on notification tap).
+ * Everything app-specific the service needs (texts, icons, sound, the screen to open on
+ * notification tap). Handed to the library by the host Application via [TimerProviderOwner].
  */
-interface TimerProvider {
-    val progressContent: TimerProgressContent
-    val doneContent: TimerDoneContent
+public interface TimerProvider {
+    public val progressContent: TimerProgressContent
+    public val doneContent: TimerDoneContent
 
     /** Opened when the user taps the notification. */
-    fun contentIntent(): PendingIntent
+    public fun contentIntent(): PendingIntent
 
     /** Volume of the completion sound in `0f..1f`. */
-    val soundVolume: Float get() = 0.5f
+    public val soundVolume: Float get() = 0.5f
 
-    /** User-visible name of the notification channel. */
-    val channelName: String get() = "Timer"
+    /** User-visible name of the channel for the running / paused countdown. */
+    public val channelName: String get() = "Timer"
+
+    /** User-visible name of the high-importance channel for the "done" notification. */
+    public val completionChannelName: String get() = "Timer finished"
 }

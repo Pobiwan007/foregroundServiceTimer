@@ -76,14 +76,14 @@ class CountdownTimerTest {
     }
 
     @Test
-    fun `restart after finish runs the full duration again`() = runTest {
+    fun `start after finish runs the full duration again`() = runTest {
         val timer = timer()
         timer.start(2_000)
         runCurrent()
         advance(2_000)
         assertEquals(TimerState.Finished(2_000), timer.state.value)
 
-        timer.restart()
+        timer.start(2_000)
         runCurrent()
 
         assertEquals(TimerState.Running(2_000, 2_000), timer.state.value)
@@ -102,12 +102,11 @@ class CountdownTimerTest {
     }
 
     @Test
-    fun `pause, resume and restart are no-ops in Idle`() = runTest {
+    fun `pause and resume are no-ops in Idle`() = runTest {
         val timer = timer()
 
         timer.pause()
         timer.resume()
-        timer.restart()
 
         assertEquals(TimerState.Idle, timer.state.value)
     }
