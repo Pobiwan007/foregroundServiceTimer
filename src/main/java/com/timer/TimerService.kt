@@ -8,7 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.media.MediaPlayer
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
@@ -42,7 +41,7 @@ class TimerService : LifecycleService() {
 
     private val notificationManager by lazy { NotificationManagerCompat.from(this) }
     private val countdown by lazy { CountdownTimer(lifecycleScope, Clock(SystemClock::elapsedRealtime)) }
-    private var mediaPlayer: MediaPlayer? = null
+    private val soundPlayer by lazy { CompletionSoundPlayer(this) }
 
     override fun onCreate() {
         super.onCreate()
@@ -75,8 +74,7 @@ class TimerService : LifecycleService() {
     }
 
     override fun onDestroy() {
-        mediaPlayer?.release()
-        mediaPlayer = null
+        soundPlayer.release()
         _state.value = TimerState.Idle
         super.onDestroy() // cancels lifecycleScope and the countdown with it
     }
@@ -130,16 +128,7 @@ class TimerService : LifecycleService() {
 
     private fun playDoneSound() {
         val soundRes = timerProvider.doneContent.doneSound ?: return
-        val volume = timerProvider.soundVolume.coerceIn(0f, 1f)
-        mediaPlayer?.release()
-        mediaPlayer = MediaPlayer.create(this, soundRes)?.apply {
-            setVolume(volume, volume)
-            setOnCompletionListener { player ->
-                player.release()
-                if (mediaPlayer === player) mediaPlayer = null
-            }
-            start()
-        }
+        soundPlayer.play(soundRes, timerProvider.soundVolume)
     }
 
     private fun buildProgressNotification(remainingMillis: Long, isRunning: Boolean): Notification {
