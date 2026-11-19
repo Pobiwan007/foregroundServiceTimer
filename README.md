@@ -8,6 +8,12 @@
 An Android library: a countdown timer that keeps running in the background as a **foreground service**,
 with an interactive notification (Pause / Resume / Stop, Replay when done) and a completion sound.
 
+<p align="center">
+  <img src="docs/images/demo.gif" alt="Notification countdown with Pause, Resume and Replay, and the matching TimerState emitted by the StateFlow" width="800">
+</p>
+
+<sub>Animated illustration of the notification flow and the `StateFlow` values the UI receives.</sub>
+
 ## Features
 
 - `TimerController` interface with `state: StateFlow<TimerState>`: inject it into a ViewModel, fake it in tests
