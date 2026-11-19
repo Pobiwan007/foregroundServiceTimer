@@ -13,3 +13,6 @@ captures/
 
 # OS
 .DS_Store
+
+# Kotlin 2.x session data
+.kotlin/
