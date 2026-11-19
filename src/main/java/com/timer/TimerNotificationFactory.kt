@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -25,7 +26,6 @@ internal class TimerNotificationFactory(
     private val contentIntent by lazy { provider.contentIntent() }
     private val pauseIntent by lazy { serviceIntent(TimerService.ACTION_PAUSE) }
     private val resumeIntent by lazy { serviceIntent(TimerService.ACTION_RESUME) }
-    private val replayIntent by lazy { serviceIntent(TimerService.ACTION_REPLAY) }
     private val stopIntent by lazy { serviceIntent(TimerService.ACTION_STOP) }
 
     /** Creates (or updates the names of) both channels. Safe to call repeatedly. */
@@ -70,14 +70,17 @@ internal class TimerNotificationFactory(
             .build()
     }
 
-    /** Finished countdown, on the high-importance channel so it shows as heads-up. */
-    fun finished(): Notification {
+    /**
+     * Finished countdown. "Replay" carries the duration in its intent, so it works even after
+     * the service has stopped.
+     */
+    fun finished(totalMillis: Long): Notification {
         val content = provider.doneContent
         return baseBuilder(content.appearance, COMPLETION_CHANNEL_ID)
             .setContentText(content.contentText)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .addAction(0, content.replayLabel, replayIntent)
+            .addAction(0, content.replayLabel, replayIntent(totalMillis))
             .addAction(0, content.stopLabel, stopIntent)
             .setDeleteIntent(stopIntent)
             .build()
@@ -109,10 +112,22 @@ internal class TimerNotificationFactory(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+    /** Replay must promote the service to the foreground, so it is sent as a foreground-service start. */
+    private fun replayIntent(totalMillis: Long): PendingIntent {
+        val intent = TimerService.startIntent(context, totalMillis)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(context, REPLAY_REQUEST_CODE, intent, flags)
+        } else {
+            PendingIntent.getService(context, REPLAY_REQUEST_CODE, intent, flags)
+        }
+    }
+
     companion object {
         const val PROGRESS_CHANNEL_ID = "com.timer.TIMER_CHANNEL"
         const val COMPLETION_CHANNEL_ID = "com.timer.TIMER_DONE_CHANNEL"
         const val PROGRESS_NOTIFICATION_ID = 7_001
         const val COMPLETION_NOTIFICATION_ID = 7_002
+        private const val REPLAY_REQUEST_CODE = 7_003
     }
 }

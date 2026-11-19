@@ -48,17 +48,6 @@ class CountdownTimer(
         run(remainingMillis = paused.remainingMillis, totalMillis = paused.totalMillis)
     }
 
-    /** Starts again from the full duration of the current or last finished countdown. */
-    fun restart() {
-        val total = when (val current = _state.value) {
-            is TimerState.Running -> current.totalMillis
-            is TimerState.Paused -> current.totalMillis
-            is TimerState.Finished -> current.totalMillis
-            TimerState.Idle -> return
-        }
-        run(remainingMillis = total, totalMillis = total)
-    }
-
     fun stop() {
         job?.cancel()
         _state.value = TimerState.Idle
