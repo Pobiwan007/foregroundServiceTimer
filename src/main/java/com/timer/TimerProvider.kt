@@ -3,8 +3,8 @@ package com.timer
 import android.app.PendingIntent
 
 /**
- * Supplied by the host app through Hilt: everything app-specific the service needs
- * (texts, icons, sound, the screen to open on notification tap).
+ * Everything app-specific the service needs (texts, icons, sound, the screen to open on
+ * notification tap). Handed to the library by the host Application via [TimerProviderOwner].
  */
 interface TimerProvider {
     val progressContent: TimerProgressContent

@@ -17,12 +17,10 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.timer.TimerNotificationFactory.Companion.COMPLETION_NOTIFICATION_ID
 import com.timer.TimerNotificationFactory.Companion.PROGRESS_NOTIFICATION_ID
-import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Thin orchestrator: routes intents to [CountdownTimer], publishes its state to [TimerStateStore]
@@ -31,13 +29,12 @@ import javax.inject.Inject
  * Lifecycle: foreground while running or paused; once finished it posts the "done" notification,
  * plays the sound and stops itself. Replay / Stop on that notification start it again.
  *
- * Controlled through [TimerController]. App-specific texts, icons and sound come from a [TimerProvider] bound in the app's Hilt graph.
+ * Controlled through [TimerController]. App-specific texts, icons and sound come from the
+ * [TimerProvider] of the host [android.app.Application] (see [TimerProviderOwner]).
  */
-@AndroidEntryPoint
 class TimerService : LifecycleService() {
 
-    @Inject
-    lateinit var timerProvider: TimerProvider
+    private val timerProvider: TimerProvider by lazy { TimerProviderOwner.from(application) }
 
     private val notifications by lazy { TimerNotificationFactory(this, timerProvider) }
     private val notificationManager by lazy { NotificationManagerCompat.from(this) }
